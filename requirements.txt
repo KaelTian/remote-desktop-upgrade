@@ -1,10 +1,8 @@
-pillow==9.5.0
-numpy==1.24.3
-opencv-python==4.7.0.72
+# 基础核心依赖
+pillow==9.2.0
 pyautogui==0.9.53
-keyboard==0.13.5
-mouse==0.7.1
-socket-io==0.2.1
-cryptography==40.0.2
-pywin32==306; sys_platform == 'win32'
-pynput==1.7.6 
+pynput==1.7.3
+python-socketio==5.3.2
+python-engineio==4.3.1
+cryptography==38.0.4
+numpy==1.23.5 

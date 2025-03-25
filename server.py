@@ -2,26 +2,25 @@
 远程桌面控制系统 - 服务端（被控制端）
 负责捕获屏幕并发送给客户端，接收客户端发送的键盘和鼠标控制命令
 """
-import os
-import sys
 import time
 import socket
 import threading
 import io
 import base64
-import json
 from PIL import ImageGrab # type: ignore
-import pyautogui
 import keyboard
 from pynput.mouse import Button, Controller as MouseController
 from pynput.keyboard import Key, Controller as KeyboardController
+import logging
+from typing import Dict, Any
+import imagehash
 
 # 导入自定义工具模块
 from utils import SecureSocket, get_local_ip, compress_image
 
 # 服务端配置
 DEFAULT_PORT = 5555
-SCREEN_SIZE = pyautogui.size()
+SCREEN_SIZE = ImageGrab.grab().size
 SERVER_VERSION = "1.0.0"
 
 # 控制器初始化
@@ -126,46 +125,13 @@ class RemoteDesktopServer:
             print(f"客户端 {address} 已断开连接")
             
     def send_screen(self, client):
-        """向客户端发送屏幕截图"""
-        try:
-            last_screenshot_time = 0
-            min_interval = 0.05  # 限制最高刷新率，避免网络拥塞
-            
-            while self.running and client in self.clients:
-                current_time = time.time()
-                if current_time - last_screenshot_time >= min_interval:
-                    last_screenshot_time = current_time
-                    
-                    # 捕获屏幕
-                    screenshot = ImageGrab.grab()
-                    
-                    # 将图像转换为字节流并压缩
-                    img_byte_arr = io.BytesIO()
-                    screenshot.save(img_byte_arr, format='JPEG', quality=self.screen_quality)
-                    img_bytes = img_byte_arr.getvalue()
-                    
-                    # 压缩图像数据
-                    compressed_img = compress_image(img_bytes, quality=self.screen_quality)
-                    
-                    # 编码为Base64以便JSON传输
-                    img_base64 = base64.b64encode(compressed_img).decode('utf-8')
-                    
-                    # 发送屏幕数据
-                    client.send_data({
-                        "type": "screen",
-                        "image": img_base64,
-                        "timestamp": current_time
-                    })
-                    
-                # 控制发送频率
-                time.sleep(0.01)
-                
-        except Exception as e:
-            print(f"发送屏幕出错: {e}")
-            if client in self.clients:
-                self.clients.remove(client)
-                client.close()
-                
+        """简化屏幕捕获"""
+        screenshot = ImageGrab.grab()
+        img_byte_arr = io.BytesIO()
+        screenshot.save(img_byte_arr, format='JPEG', quality=85)
+        img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode()
+        client.send_data({"type": "screen", "image": img_base64})
+        
     def process_command(self, command):
         """处理客户端发送的控制命令"""
         try:

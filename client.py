@@ -2,8 +2,7 @@
 远程桌面控制系统 - 客户端（控制端）
 负责显示服务端的屏幕，发送键盘和鼠标控制命令给服务端
 """
-import os
-import sys
+import logging
 import time
 import threading
 import socket
@@ -12,7 +11,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from PIL import Image, ImageTk
 import io
-import json
 
 # 导入自定义工具模块
 from utils import SecureSocket
@@ -21,6 +19,11 @@ from utils import SecureSocket
 DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 5555
 CLIENT_VERSION = "1.0.0"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
 
 class RemoteDesktopClient:
     """远程桌面控制系统客户端类"""
@@ -206,7 +209,11 @@ class RemoteDesktopClient:
         """更新屏幕显示线程"""
         try:
             while self.connected and self.client_socket:
-                data = self.client_socket.receive_data()
+                try:
+                    data = self.client_socket.receive_data(timeout=1.0)
+                except socket.timeout:
+                    continue
+                    
                 if not data:
                     self.master.after(0, self.handle_disconnect)
                     break
@@ -215,66 +222,35 @@ class RemoteDesktopClient:
                 data_type = data.get("type", "")
                 
                 if data_type == "server_info":
-                    # 处理服务器信息
-                    self.server_info = data
+                    self.server_info = data  # 使用属性类型提示
                     self.master.after(0, lambda: self.statusbar.config(
                         text=f"服务器版本: {data.get('version', '未知')}"
                     ))
                     
                 elif data_type == "screen":
-                    # 处理屏幕图像
-                    image_data = data.get("image", "")
-                    if image_data:
-                        # 解码Base64图像
-                        img_bytes = base64.b64decode(image_data)
-                        
-                        # 从字节流创建图像
-                        image = Image.open(io.BytesIO(img_bytes))
-                        
-                        # 根据窗口大小调整图像
-                        self.master.after(0, lambda img=image: self.display_image(img))
-                        
+                    self.process_screen_data(data.get("image", ""))
+                    
         except Exception as e:
             if self.connected:
                 self.master.after(0, lambda: self.handle_error(str(e)))
                 
+    def process_screen_data(self, image_data):
+        """处理屏幕图像数据"""
+        if not image_data:
+            return
+            
+        try:
+            img_bytes = base64.b64decode(image_data)
+            image = Image.open(io.BytesIO(img_bytes))
+            self.master.after(0, lambda img=image: self.display_image(img))
+        except Exception as e:
+            logging.error("图像处理失败: %s", e)
+        
     def display_image(self, image):
-        """在画布上显示图像"""
-        if not self.connected:
-            return
-            
-        # 获取画布大小
-        canvas_width = self.canvas.winfo_width()
-        canvas_height = self.canvas.winfo_height()
+        """简化图像显示"""
+        self.current_image = ImageTk.PhotoImage(image)
+        self.canvas.create_image(0, 0, image=self.current_image, anchor=tk.NW)
         
-        if canvas_width <= 1 or canvas_height <= 1:
-            # 画布尚未完全初始化，稍后再试
-            self.master.after(100, lambda: self.display_image(image))
-            return
-            
-        # 计算图像缩放比例
-        img_width, img_height = image.size
-        width_scale = canvas_width / img_width
-        height_scale = canvas_height / img_height
-        self.screen_scale = min(width_scale, height_scale)
-        
-        # 调整图像大小
-        new_width = int(img_width * self.screen_scale)
-        new_height = int(img_height * self.screen_scale)
-        
-        if new_width > 0 and new_height > 0:
-            resized_image = image.resize((new_width, new_height), Image.LANCZOS)
-            self.current_image = ImageTk.PhotoImage(resized_image)
-            
-            # 清除画布并显示新图像
-            self.canvas.delete("all")
-            self.canvas.create_image(
-                canvas_width // 2, 
-                canvas_height // 2, 
-                image=self.current_image,
-                anchor=tk.CENTER
-            )
-            
     def set_quality(self, event=None):
         """设置图像质量"""
         if self.connected and self.client_socket:
@@ -382,8 +358,7 @@ class RemoteDesktopClient:
             
     def translate_key(self, event):
         """翻译按键名称为pynput可用的格式"""
-        # 特殊键映射
-        special_keys = {
+        KEY_MAP = {  # 使用常量优化
             'Shift_L': 'shift',
             'Shift_R': 'shift',
             'Control_L': 'ctrl',
@@ -409,9 +384,8 @@ class RemoteDesktopClient:
         
         key_name = event.keysym
         
-        # 如果是特殊键
-        if key_name in special_keys:
-            return special_keys[key_name]
+        if key_name in KEY_MAP:
+            return KEY_MAP[key_name]
         elif len(key_name) == 1:
             # 普通字符键
             return key_name
